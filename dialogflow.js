@@ -50,8 +50,7 @@ webApp.use((req, res, next) => {
 });
 
 webApp.get('/', (req, res) => {
-    res.sendStatus(200);
-    res.send("Status Okay")
+    res.send("Status Okay");
 });
 
 webApp.post('/dialogflow', async (req, res) => {

@@ -1,0 +1,33 @@
+{
+  "name": "saylani-batch",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/dialogflow": "^7.4.0",
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.90.1",
+    "cors": "^2.8.5",
+    "dialogflow-fulfillment": "^0.5.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "nodemailer": "^7.0.12",
+    "nodemon": "^3.1.11",
+    "openai": "^3.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hammad-air/Saylani-Batch-2.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hammad-air/Saylani-Batch-2/issues"
+  },
+  "homepage": "https://github.com/hammad-air/Saylani-Batch-2#readme",
+  "description": ""
+}

@@ -244,3 +244,5 @@ webApp.post('/dialogflow', async (req, res) => {
 webApp.listen(PORT, () => {
     console.log(`Server is up and running at http://localhost:${PORT}/`);
 });
+
+module.exports = webApp;

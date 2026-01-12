@@ -11,5 +11,10 @@
             "src": "/(.*)",
             "dest": "dialogflow.js"
         }
-    ]
+    ],
+    "functions": {
+        "dialogflow.js": {
+            "maxDuration": 30
+        }
+    }
 }

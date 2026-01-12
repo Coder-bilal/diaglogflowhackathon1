@@ -4,14 +4,13 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const nodemailer = require('nodemailer');
-const { WebhookClient, Payload } = require('dialogflow-fulfillment');
+const { WebhookClient } = require('dialogflow-fulfillment');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 
 // ────────────────────────────────────────────────
 //  Environment variables check
 // ────────────────────────────────────────────────
-// Note: We use process.env.SUPABASE_URL if available, otherwise we log a warning but don't exit to allow partial functionality
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.warn('Missing SUPABASE_URL or SUPABASE_KEY in .env - Database features will be disabled');
 }
@@ -43,15 +42,6 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-// Verify transporter (only once on startup)
-transporter.verify((error) => {
-    if (error) {
-        console.error('Email transporter error:', error);
-    } else {
-        console.log('Email transporter is ready');
-    }
-});
-
 // ────────────────────────────────────────────────
 //  Express setup
 // ────────────────────────────────────────────────
@@ -59,7 +49,6 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
-app.use(express.static('public'));
 
 const PORT = process.env.PORT || 5000;
 
@@ -68,7 +57,7 @@ app.get('/', (req, res) => {
     res.send('Dialogflow + Gemini + Supabase + Email webhook server is running');
 });
 
-// Middleware to log requests (from your original code)
+// Middleware to log requests
 app.use((req, res, next) => {
     console.log(`Path ${req.path} with Method ${req.method}`);
     next();
@@ -80,16 +69,13 @@ app.use((req, res, next) => {
 async function getGeminiResponse(queryText) {
     try {
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
         const generationConfig = {
             temperature: 1,
             topK: 0,
             topP: 0.95,
             maxOutputTokens: 200,
         };
-
         const chat = model.startChat({ generationConfig, history: [] });
-
         const result = await chat.sendMessage(queryText);
         const response = await result.response;
         return response.text().trim();
@@ -120,35 +106,11 @@ async function sendEmailAsync(to, subject, text) {
 }
 
 // ────────────────────────────────────────────────
-//  Chips helper functions
-// ────────────────────────────────────────────────
-function getChips(excludeIntent) {
-    const options = [
-        { text: "ℹ️ About Our Services", intent: "RotiBank_Info" },
-        { text: "📍 Find Centers", intent: "RotiBank_Location" },
-        { text: "💰 Make a Donation", intent: "RotiBank_Donate" },
-        { text: "🎓 IT Course Registration", intent: "IT_Registration" },
-        { text: "📅 Book Appointment", intent: "BookAppointment" }
-    ];
-    return options.filter(o => o.intent !== excludeIntent).map(o => ({ text: o.text }));
-}
-
-function addChips(agent, text, excludeIntent) {
-    agent.add(text);
-    agent.add(new Payload('UNSPECIFIED', {
-        richContent: [[
-            { type: "chips", options: getChips(excludeIntent) }
-        ]]
-    }, { sendAsMessage: true, rawPayload: true }));
-}
-
-// ────────────────────────────────────────────────
 //  Main webhook endpoint
 // ────────────────────────────────────────────────
 app.post('/dialogflow', async (req, res) => {
     const agent = new WebhookClient({ request: req, response: res });
 
-    // Extract session ID (useful for logging)
     let sessionId = 'unknown';
     if (req.body.session && req.body.session.length > 43) {
         sessionId = (req.body.session).substr(43);
@@ -159,46 +121,18 @@ app.post('/dialogflow', async (req, res) => {
 
     // ── Welcome ─────────────────────────────────────
     function welcome(agent) {
-        console.log(`intent  =>  hi`);
-        agent.add('Hi, I am your virtual assistant, Tell me how can I help you');
+        agent.add("Assalam-o-Alaikum! Welcome to Saylani Welfare. I am your virtual assistant. How may I assist you today? You can ask about Roti Bank, Donations, IT Registration, or Locations.");
     }
 
     // ── Roti Bank Info Intent ───────────────────────
     function rotiBankInfo(agent) {
         console.log("Handling RotiBank_Info");
-        // Always add a text response first, which serves as a basic fallback
-        agent.add("Saylani Roti Bank feeds 300,000+ people daily across 630+ centers.");
-
-        try {
-            // use 'UNSPECIFIED' for default platform compatibility
-            const payload = new Payload('UNSPECIFIED', {
-                richContent: [[
-                    {
-                        type: "image",
-                        rawUrl: "https://i.pinimg.com/736x/9c/9a/ef/9c9aefcf49d7f51f9be204b650e7362e.jpg",
-                        accessibilityText: "Saylani Logo"
-                    },
-                    {
-                        type: "info",
-                        title: "Saylani Dastarkhwan",
-                        subtitle: "Feeding 300,000+ daily"
-                    },
-                    { type: "chips", options: getChips("RotiBank_Info") }
-                ]]
-            }, { sendAsMessage: true, rawPayload: true });
-
-            agent.add(payload);
-        } catch (e) {
-            console.error("Payload Error:", e);
-        }
+        agent.add("Saylani Roti Bank is a flagship initiative providing free meals to the needy. We feed over 300,000+ people daily across 630+ locations in Pakistan, ensuring no one goes to bed hungry.");
     }
 
     // ── Locations Intent ────────────────────────────
     function locations(agent) {
-        addChips(agent,
-            "We have presence in Karachi, Lahore, Islamabad, Faisalabad and Hyderabad.\nCall 111-729-526 for the nearest center.",
-            "RotiBank_Location"
-        );
+        agent.add("We have a wide network across major cities including Karachi, Lahore, Islamabad, Faisalabad, and Hyderabad. For the nearest center's exact location, please call our UAN: 111-729-526.");
     }
 
     // ── Donation Intent ─────────────────────────────
@@ -206,8 +140,8 @@ app.post('/dialogflow', async (req, res) => {
         const choice = (agent.parameters.Donation || "").toString();
         const query = agent.query;
 
-        let message = `JazakAllah! To donate (${choice || "General"}):\n` +
-            "1. Bank Transfer\n2. Online (saylaniwelfare.com)\n3. Visit any center.";
+        const message = `JazakAllah Khair! To contribute to our cause (${choice || "General Donation"}):\n` +
+            "1. Bank Transfer\n2. Online via website (saylaniwelfare.com)\n3. Visit any of our global centers.\n\nYour support helps us serve humanity better.";
 
         // Logic: Send Email + Save to DB (Fire-and-forget for speed)
         (async () => {
@@ -220,7 +154,7 @@ app.post('/dialogflow', async (req, res) => {
             }
         })();
 
-        addChips(agent, message, "RotiBank_Donate");
+        agent.add(message);
     }
 
     // ── IT Registration Intent ──────────────────────
@@ -228,7 +162,7 @@ app.post('/dialogflow', async (req, res) => {
         const { person, Courses, email, phone } = agent.parameters;
         const name = person && person.name ? person.name : (person || "Student");
 
-        const responseText = `Thank you ${name}.\nReceived request for: ${Courses}\nWe will contact you at ${phone} or ${email}.`;
+        const responseText = `Thank you, ${name}. We have received your interest in the ${Courses} course.\nOur team will review your request and contact you at ${phone} or ${email} shortly.\nStay tuned for updates!`;
 
         // Logic: Send Email + Save to DB (Fire-and-forget for speed)
         (async () => {
@@ -252,26 +186,22 @@ app.post('/dialogflow', async (req, res) => {
             }
         })();
 
-        addChips(agent, responseText, "IT_Registration");
+        agent.add(responseText);
     }
 
     // ── Book Appointment Intent ─────────────────────
     function bookAppointment(agent) {
-        const message = "You can book an appointment or consultation with the Saylani team:\n\n" +
-            "1. Visit our official Calendly (if available) or call directly:\n" +
-            "   UAN: 021-111-729-526\n" +
-            "2. For IT Training related queries, register online:\n" +
-            "   https://www.saylanimit.com/enroll\n" +
-            "3. General meetings: Email us at saylanimass@gmail.com or call the UAN.\n\n" +
-            "JazakAllah! We'll get back to you soon.";
-        addChips(agent, message, "BookAppointment");
+        const message = "You can easily book an appointment with us:\n\n" +
+            "1. Call our UAN: 021-111-729-526\n" +
+            "2. For IT Training, visit: https://www.saylanimit.com\n" +
+            "3. For general queries, email: info@saylaniwelfare.com\n\n" +
+            "We look forward to hearing from you!";
+        agent.add(message);
     }
 
     // ── Fallback / Unknown ──────────────────────────
     async function fallback(agent) {
-        let action = req.body.queryResult.action;
         let queryText = req.body.queryResult.queryText;
-
         console.log(`Fallback processing for: ${queryText}`);
 
         try {
@@ -283,7 +213,7 @@ app.post('/dialogflow', async (req, res) => {
             agent.add(result);
         } catch (err) {
             console.error("Gemini/Timeout Error:", err);
-            agent.add("I'm currently experiencing heavy traffic. Please ask your question again.");
+            agent.add("I apologize, but I am ensuring a quick response and your request took a bit too long. Could you please rephrase or ask again?");
         }
     }
 
@@ -298,11 +228,9 @@ app.post('/dialogflow', async (req, res) => {
     intentMap.set('BookAppointment', bookAppointment);
 
     try {
-        // AWAIT IS CRITICAL HERE
         await agent.handleRequest(intentMap);
     } catch (err) {
         console.error("Critical Webhook Error:", err.message);
-        // SAFELY RETURN 200 with JSON to prevent 500 error in Dialogflow
         if (!res.headersSent) {
             return res.json({
                 fulfillmentText: "I'm having a technical issue, but I'm here to help. Could you try asking that again?"
@@ -318,5 +246,3 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}   →   http://localhost:${PORT}/`);
     console.log(`Webhook endpoint:                 /dialogflow`);
 });
-
-module.exports = app;

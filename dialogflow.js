@@ -135,7 +135,7 @@ function getChips(excludeIntent) {
 
 function addChips(agent, text, excludeIntent) {
     agent.add(text);
-    agent.add(new Payload('PLATFORM_UNSPECIFIED', {
+    agent.add(new Payload('UNSPECIFIED', {
         richContent: [[
             { type: "chips", options: getChips(excludeIntent) }
         ]]
@@ -170,9 +170,8 @@ app.post('/dialogflow', async (req, res) => {
         agent.add("Saylani Roti Bank feeds 300,000+ people daily across 630+ centers.");
 
         try {
-            // Attempt to add the rich card
-            // We use 'PLATFORM_UNSPECIFIED' which typically works for custom payloads
-            const payload = new Payload('PLATFORM_UNSPECIFIED', {
+            // use 'UNSPECIFIED' for default platform compatibility
+            const payload = new Payload('UNSPECIFIED', {
                 richContent: [[
                     {
                         type: "image",

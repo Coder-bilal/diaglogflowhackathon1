@@ -2,35 +2,33 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const nodemailer = require('nodemailer');
 const { WebhookClient } = require('dialogflow-fulfillment');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 
 // ────────────────────────────────────────────────
-//  Environment variables check
+// Environment variables check
 // ────────────────────────────────────────────────
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.warn('Missing SUPABASE_URL or SUPABASE_KEY in .env - Database features will be disabled');
 }
 
-// Hardcoded API Key for Gemini as per original file, though env var is preferred
-const GEMINI_API_KEY = "AIzaSyC0El0Cxp-tAGj1Zx5rZAllypZr4Fzst78";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyC0El0Cxp-tAGj1Zx5rZAllypZr4Fzst78";
 if (!GEMINI_API_KEY) {
     console.error('Missing GEMINI_API_KEY');
     process.exit(1);
 }
 
 // ────────────────────────────────────────────────
-//  Initialize clients
+// Initialize clients
 // ────────────────────────────────────────────────
 const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_KEY)
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
     : null;
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const MODEL_NAME = 'gemini-1.5-flash';
+const MODEL_NAME = 'gemini-1.5-flash-latest';   // ← updated to latest alias (stable)
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
@@ -38,12 +36,12 @@ const transporter = nodemailer.createTransport({
     secure: false,
     auth: {
         user: "bilal317699@gmail.com",
-        pass: "khrc vion ltiv hdvi",
+        pass: "khrc vion ltiv hdvi",   // ← App Password — never commit this!
     },
 });
 
 // ────────────────────────────────────────────────
-//  Express setup
+// Express setup
 // ────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
@@ -54,43 +52,43 @@ const PORT = process.env.PORT || 5000;
 
 // Simple status route
 app.get('/', (req, res) => {
-    res.send('Dialogflow + Gemini + Supabase + Email webhook server is running');
+    res.send('Saylani Welfare Dialogflow webhook is running');
 });
 
-// Middleware to log requests
+// Request logging middleware
 app.use((req, res, next) => {
     console.log(`Path ${req.path} with Method ${req.method}`);
     next();
 });
 
 // ────────────────────────────────────────────────
-//  Gemini helper function
+// Gemini helper function
 // ────────────────────────────────────────────────
 async function getGeminiResponse(queryText) {
     try {
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const generationConfig = {
-            temperature: 1,
-            topK: 0,
+            temperature: 0.9,
             topP: 0.95,
-            maxOutputTokens: 200,
+            topK: 40,
+            maxOutputTokens: 250,
         };
         const chat = model.startChat({ generationConfig, history: [] });
         const result = await chat.sendMessage(queryText);
         const response = await result.response;
-        return response.text().trim();
+        return response.text().trim() || "No response generated.";
     } catch (err) {
         console.error('Gemini error:', err);
-        return "I am currently unable to process that. Please try again later.";
+        return "Sorry, I'm having trouble processing that right now. Please try again.";
     }
 }
 
 // ────────────────────────────────────────────────
-//  Email helper function
+// Email helper function
 // ────────────────────────────────────────────────
 async function sendEmailAsync(to, subject, text) {
     const message = {
-        from: '"Saylani Bot" <bilal317699@gmail.com>',
+        from: '"Saylani Welfare Bot" <bilal317699@gmail.com>',
         to,
         subject,
         text,
@@ -106,51 +104,137 @@ async function sendEmailAsync(to, subject, text) {
 }
 
 // ────────────────────────────────────────────────
-//  Main webhook endpoint
+// Main webhook endpoint
 // ────────────────────────────────────────────────
 app.post('/dialogflow', async (req, res) => {
     const agent = new WebhookClient({ request: req, response: res });
 
     let sessionId = 'unknown';
-    if (req.body.session && req.body.session.length > 43) {
-        sessionId = (req.body.session).substr(43);
-    } else if (req.body.session) {
-        sessionId = req.body.session.split('/').pop();
+    if (req.body.session) {
+        const parts = req.body.session.split('/');
+        sessionId = parts[parts.length - 1] || 'unknown';
     }
     console.log(`Webhook called — session: ${sessionId}`);
 
     // ── Welcome ─────────────────────────────────────
     function welcome(agent) {
-        agent.add("Assalam-o-Alaikum! Welcome to Saylani Welfare. I am your virtual assistant. How may I assist you today? You can ask about Roti Bank, Donations, IT Registration, or Locations.");
+        agent.add("Assalam-o-Alaikum! Welcome to Saylani Welfare. " +
+            "I am your virtual assistant. How may I assist you today?\n\n" +
+            "You can ask about:\n• Roti Bank\n• Donations\n• Mass IT Training\n• Locations\n• Appointments");
     }
 
-    // ── Roti Bank Info Intent ───────────────────────
+    // ── Roti Bank Info ──────────────────────────────
     function rotiBankInfo(agent) {
-        console.log("Handling RotiBank_Info");
-        agent.add("Saylani Roti Bank is a flagship initiative providing free meals to the needy. We feed over 300,000+ people daily across 630+ locations in Pakistan, ensuring no one goes to bed hungry.");
+        agent.add("Saylani Roti Bank is our flagship hunger relief program.\n" +
+            "We provide free meals to over 300,000 people daily across 630+ locations in Pakistan.");
     }
 
-    // ── Locations Intent ────────────────────────────
+    // ── Roti Bank Locations ─────────────────────────
     function locations(agent) {
-        agent.add("We have a wide network across major cities including Karachi, Lahore, Islamabad, Faisalabad, and Hyderabad. For the nearest center's exact location, please call our UAN: 111-729-526.");
+        agent.add("Saylani has centers in major cities: Karachi, Lahore, Islamabad, Faisalabad, Hyderabad, and many more.\n\n" +
+            "For the nearest center, please call our UAN: 111-729-526");
     }
 
     // ── Donation Intent ─────────────────────────────
+    // ── Donation Intent (Clean version – no @sys.any assumption) ─────────────────────────────
+    // ── Donation Intent (Clean version – no @sys.any assumption) ─────────────────────────────
     async function donation(agent) {
-        const choice = (agent.parameters.Donation || "").toString();
-        const query = agent.query;
+        const params = agent.parameters || {};
+        let query = agent.query || "";
 
-        const message = `JazakAllah Khair! To contribute to our cause (${choice || "General Donation"}):\n` +
-            "1. Bank Transfer\n2. Online via website (saylaniwelfare.com)\n3. Visit any of our global centers.\n\nYour support helps us serve humanity better.";
+        // Extract parameters – custom entity + system entities
+        let donationType = params.donation_type || "General";
+        let amountRaw = params.amount || null;
+        let phone = params.phone || "";
+        let email = params.email || "";
 
-        // Logic: Send Email + Save to DB (Fire-and-forget for speed)
+        // Fix: Extracts name correctly even if it's an object (sys.person)
+        let name = "";
+        let rawName = params.name;
+        if (rawName) {
+            if (typeof rawName === 'object') {
+                name = rawName.name || rawName['given-name'] || rawName.displayName || rawName.structValue?.fields?.name?.stringValue || "";
+            } else {
+                name = String(rawName);
+            }
+        }
+
+        // Fix: If 'query' is just the email (due to slot filling), use a summary instead
+        if (query.includes('@') && !query.includes(' ')) {
+            query = `Donation Request (${donationType})`;
+        }
+
+        // Clean donation type
+        donationType = donationType.trim();
+        if (!donationType || donationType.toLowerCase() === "donation" || donationType === "") {
+            donationType = "General";
+        }
+
+        // Amount ko display ke liye format karo (PKR add kar do)
+        let amountDisplay = amountRaw ? `${amountRaw} PKR` : "Not specified";
+        let amountForDB = amountRaw ? String(amountRaw) : null;  // TEXT column ke liye string
+
+        // User ko dikhane wala message
+        // User ko dikhane wala message
+        let message = `💚 **Thank You!**\n` +
+            `We have noted your donation request. Your support means a lot!\n\n` +
+            `📋 **Details:**\n` +
+            `• **Type:** ${donationType}\n` +
+            `• **Amount:** ${amountDisplay}\n`;
+
+        if (name) message += `• **Name:** ${name}\n`;
+        if (phone) message += `• **Phone:** ${phone}\n`;
+        if (email) message += `• **Email:** ${email}\n`;
+
+        message += `\nTo complete your donation, please visit:\n` +
+            `👉 [saylaniwelfare.com/donate](https://saylaniwelfare.com/donate)\n\n` +
+            `Or call **111-729-526** for assistance.`;
+
+
+        // Background tasks: email + DB
         (async () => {
-            sendEmailAsync("bilal317693@gmail.com", "New Donation Query", `User interested in: ${choice}\nQuery: ${query}`);
+            // Admin notification
+            await sendEmailAsync(
+                "bilal317693@gmail.com",
+                "New Donation Interest",
+                `Type: ${donationType}\n` +
+                `Amount: ${amountDisplay}\n` +
+                `Name: ${name || '-'}\n` +
+                `Phone: ${phone || '-'}\n` +
+                `Email: ${email || '-'}\n` +
+                `Query: ${query}\n` +
+                `Session: ${sessionId}\n` +
+                `Time: ${new Date().toISOString()}`
+            );
+
+            // User thank-you (agar email diya ho)
+            if (email && email.includes("@")) {
+                await sendEmailAsync(
+                    email,
+                    "Shukriya – Saylani Welfare",
+                    `Assalam-o-Alaikum ${name || "Dear Supporter"},\n\n` +
+                    `Aap ki donation interest note kar li gayi hai.\n` +
+                    `Type: ${donationType}\nAmount: ${amountDisplay}\n\n` +
+                    `Please donate via: https://saylaniwelfare.com/donate\n\n` +
+                    `JazakAllah – Saylani Team`
+                );
+            }
+
+            // Supabase save
             if (supabase) {
-                const { error } = await supabase
-                    .from('donations')
-                    .insert([{ type: choice, query: query, date: new Date() }]);
-                if (error) console.error("Supabase Donation Error:", error);
+                const row = {
+                    donation_type: donationType,
+                    amount: amountForDB,
+                    name: name || null,
+                    phone: phone || null,
+                    email: email || null,
+                    query_text: query,
+                    session_id: sessionId
+                };
+
+                const { error } = await supabase.from('donations').insert([row]);
+                if (error) console.error("DB insert error:", error);
+                else console.log("Donation saved");
             }
         })();
 
@@ -159,65 +243,182 @@ app.post('/dialogflow', async (req, res) => {
 
     // ── IT Registration Intent ──────────────────────
     async function itRegistration(agent) {
-        const { person, Courses, email, phone } = agent.parameters;
-        const name = person && person.name ? person.name : (person || "Student");
+        // Safer parameter extraction
+        const params = agent.parameters || {};
 
-        const responseText = `Thank you, ${name}. We have received your interest in the ${Courses} course.\nOur team will review your request and contact you at ${phone} or ${email} shortly.\nStay tuned for updates!`;
+        // Debugging logs
+        console.log("IT Registration Params:", JSON.stringify(params, null, 2));
 
-        // Logic: Send Email + Save to DB (Fire-and-forget for speed)
+        let person = "Student";
+        let rawPerson = params.person;
+
+        // Handle Array case (Dialogflow list parameters)
+        if (Array.isArray(rawPerson)) {
+            rawPerson = rawPerson.length > 0 ? rawPerson[0] : null;
+        }
+
+        if (rawPerson) {
+            if (typeof rawPerson === 'object') {
+                // Try to find any string property that looks like a name
+                person = rawPerson.name || rawPerson['given-name'] || rawPerson.displayName || rawPerson.structValue?.fields?.name?.stringValue || "Student";
+            } else {
+                person = String(rawPerson);
+            }
+        }
+
+        // Final fallback if person is somehow still an object/null
+        if (typeof person !== 'string' || person === "[object Object]") {
+            person = "Student";
+        }
+
+        const course = params.Courses || params.course || "Unknown Course";
+        const email = params.email || "";
+        const phone = params.phone || "";
+
+        const responseText = `Thank you, ${person}!\n` +
+            `We have received your interest in the **${course}** course.\n` +
+            `Our team will contact you soon at:\n` +
+            `• Phone: ${phone || "—"} \n` +
+            `• Email: ${email || "—"} \n\n` +
+            `JazakAllah for choosing Saylani Mass IT Training!`;
+
+        // Fire-and-forget: emails + db
         (async () => {
-            sendEmailAsync("bilal317693@gmail.com", "New IT Registration", `Name: ${name}\nCourse: ${Courses}\nPhone: ${phone}\nEmail: ${email}`);
+            // Admin notification
+            await sendEmailAsync(
+                "bilal317693@gmail.com",
+                "New Mass IT Registration",
+                `Name: ${person}\nCourse: ${course}\nPhone: ${phone}\nEmail: ${email}\nSession: ${sessionId}`
+            );
 
+            // Confirmation to student (if email exists)
             if (email && email.includes("@")) {
-                sendEmailAsync(email, "Registration Received - Saylani Mass IT", responseText);
+                await sendEmailAsync(
+                    email,
+                    "Saylani Mass IT - Registration Received",
+                    responseText
+                );
             }
 
             if (supabase) {
                 const { error } = await supabase
                     .from('it_registrations')
                     .insert([{
-                        name: name,
-                        course: Courses,
+                        name: person,
+                        course: course,
                         email: email,
                         phone: phone,
-                        created_at: new Date()
+                        // session_id: sessionId, // Column missing in DB
+                        // created_at: new Date().toISOString()
                     }]);
-                if (error) console.error("Supabase IT Registration Error:", error);
+                if (error) console.error("Supabase IT insert error:", error);
             }
         })();
 
         agent.add(responseText);
     }
 
-    // ── Book Appointment Intent ─────────────────────
-    function bookAppointment(agent) {
-        const message = "You can easily book an appointment with us:\n\n" +
-            "1. Call our UAN: 021-111-729-526\n" +
-            "2. For IT Training, visit: https://www.saylanimit.com\n" +
-            "3. For general queries, email: info@saylaniwelfare.com\n\n" +
-            "We look forward to hearing from you!";
-        agent.add(message);
+    // ── Book Appointment ────────────────────────────
+    // ── Book Appointment ────────────────────────────
+    async function bookAppointment(agent) {
+        const params = agent.parameters || {};
+        let userDate = params.date;
+        let rawText = agent.query || '';
+        let finalDate = "not specified";
+
+        // Extract basic contact info if available in parameters
+        const email = params.email || "";
+        const phone = params.phone || "";
+
+        if (userDate) {
+            // sys.date usually gives ISO like "2026-02-15" or object
+            if (typeof userDate === 'string') {
+                finalDate = userDate;
+            } else if (userDate.date) {   // sometimes it's {date: "2026-02-15"}
+                finalDate = userDate.date;
+            }
+        } else {
+            // Fallback: try to extract ourselves from raw text
+            const lower = rawText.toLowerCase();
+
+            if (lower.includes("tomorrow") || lower.includes("kal")) {
+                finalDate = "tomorrow";
+            } else if (lower.includes("next monday") || lower.includes("agle monday")) {
+                finalDate = "next Monday";
+            } else if (/\d{1,2}\s*(january|february|march|april|may|june|july|august|september|october|november|december)/i.test(lower)) {
+                // extract number + month with basic regex
+                const match = lower.match(/(\d{1,2})\s*(january|february|march|april|may|june|july|august|september|october|november|december)/i);
+                if (match) {
+                    finalDate = `${match[1]} ${match[2]}`;
+                }
+            }
+        }
+
+        const responseText = `🗓️ Appointment booking request received!\n\n` +
+            `Selected date: **${finalDate}**\n` +
+            (email ? `Email: ${email}\n` : "") +
+            (phone ? `Phone: ${phone}\n` : "") +
+            `\nWe have noted your request. Please call 111-729-526 to confirm and book.\n` +
+            `Or visit nearest Saylani center.`;
+
+        // Fire-and-forget: email + db
+        (async () => {
+            // Admin notification
+            await sendEmailAsync(
+                "bilal317693@gmail.com",
+                "New Appointment Request",
+                `Date: ${finalDate}\nEmail: ${email}\nPhone: ${phone}\nQuery: ${rawText}\nSession: ${sessionId}`
+            );
+
+            // User confirmation
+            if (email && email.includes("@")) {
+                await sendEmailAsync(
+                    email,
+                    "Saylani Appointment Request",
+                    responseText
+                );
+            }
+
+            if (supabase) {
+                const { error } = await supabase
+                    .from('appointments')
+                    .insert([{
+                        date: finalDate,
+                        email: email,
+                        phone: phone,
+                        query_text: rawText
+                    }]);
+                if (error) console.error("Supabase appointment insert error:", error);
+            }
+        })();
+
+        agent.add(responseText);
     }
 
     // ── Fallback / Unknown ──────────────────────────
     async function fallback(agent) {
-        let queryText = req.body.queryResult.queryText;
-        console.log(`Fallback processing for: ${queryText}`);
+        const queryText = agent.query || req.body?.queryResult?.queryText || "";
+        console.log(`Fallback → ${queryText}`);
+
+        if (!queryText.trim()) {
+            agent.add("Sorry, I didn't catch that. Could you please say it again?");
+            return;
+        }
 
         try {
             const result = await Promise.race([
                 getGeminiResponse(queryText),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
             ]);
-            console.log("Gemini Response:", result);
             agent.add(result);
         } catch (err) {
-            console.error("Gemini/Timeout Error:", err);
-            agent.add("I apologize, but I am ensuring a quick response and your request took a bit too long. Could you please rephrase or ask again?");
+            console.error("Fallback error:", err);
+            agent.add("Sorry, that took longer than expected. " +
+                "Could you please rephrase your question?");
         }
     }
 
-    // ── Intent Mapping ──────────────────────────────
+    // ── Intent mapping ──────────────────────────────
     const intentMap = new Map();
     intentMap.set('Default Welcome Intent', welcome);
     intentMap.set('Default Fallback Intent', fallback);
@@ -230,17 +431,15 @@ app.post('/dialogflow', async (req, res) => {
     try {
         await agent.handleRequest(intentMap);
     } catch (err) {
-        console.error("Critical Webhook Error:", err.message);
+        console.error("Webhook critical error:", err);
         if (!res.headersSent) {
-            return res.json({
-                fulfillmentText: "I'm having a technical issue, but I'm here to help. Could you try asking that again?"
-            });
+            agent.add("Something went wrong on our side. Please try again later.");
         }
     }
 });
 
 // ────────────────────────────────────────────────
-//  Start server
+// Start server
 // ────────────────────────────────────────────────
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}   →   http://localhost:${PORT}/`);

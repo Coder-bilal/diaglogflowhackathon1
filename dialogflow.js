@@ -25,17 +25,18 @@ const transporter = nodemailer.createTransport({
     port: 587,
     secure: false,
     auth: {
-        user: process.env.GMAIL_USER || "bilal317699@gmail.com",
+        user: process.env.GMAIL_USER || "bilal317699@gmail.com", // Fallback for testing, but setup Env Var in Vercel
         pass: process.env.GMAIL_PASS || "khrc vion ltiv hdvi",
     },
 });
 
 // ────────────────────────────────────────────────
-// Gemini Configuration 
+// Gemini Configuration (User's Implementation)
 // ────────────────────────────────────────────────
 async function runChat(queryText) {
     try {
         const genAI = new GoogleGenerativeAI(API_KEY);
+        // console.log(genAI)
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
         const generationConfig = {
@@ -47,12 +48,13 @@ async function runChat(queryText) {
 
         const chat = model.startChat({
             generationConfig,
-            history: [],
+            history: [
+            ],
         });
 
         const result = await chat.sendMessage(queryText);
         const response = result.response;
-        return response.text().trim();
+        return response.text();
     } catch (error) {
         console.error("Gemini Error:", error);
         return "Sorry, I am having trouble connecting to the AI server. Please try again later.";
@@ -80,7 +82,7 @@ async function sendEmailAsync(to, subject, text) {
 // Express App Setup
 // ────────────────────────────────────────────────
 const webApp = express();
-const PORT = process.env.PORT || 6000;
+const PORT = process.env.PORT || 6000; // Keeping 6000 as per user's running process
 
 webApp.use(express.urlencoded({
     extended: true
@@ -102,7 +104,7 @@ webApp.get('/', (req, res) => {
 // ────────────────────────────────────────────────
 webApp.post('/dialogflow', async (req, res) => {
 
-    // Safe Session ID Parsing
+    // Safe Session ID Parsing for Vercel & Dialogflow
     const session = req.body.session || '';
     const id = session.split('/').pop() || 'unknown';
     console.log(`Session ID: ${id}`);
@@ -112,18 +114,20 @@ webApp.post('/dialogflow', async (req, res) => {
         response: res
     });
 
-    // ── Intent Functions ────────────────────────────
+   // ── Intent Functions ────────────────────────────
 
-    async function fallback() {
+   async function fallback() {
         let action = req.body.queryResult.action;
         let queryText = req.body.queryResult.queryText;
 
         if (action === 'input.unknown') {
             let result = await runChat(queryText);
             agent.add(result);
+            console.log(result)
         } else {
             let result = await runChat(queryText);
             agent.add(result);
+            console.log(result)
         }
     }
 
@@ -347,7 +351,7 @@ webApp.post('/dialogflow', async (req, res) => {
         agent.add(responseText);
     }
 
-    // ── Intent Mapping ──────────────────────────────
+ // ── Intent Mapping ──────────────────────────────
     let intentMap = new Map();
     intentMap.set('Default Welcome Intent', welcome);
     intentMap.set('Default Fallback Intent', fallback);

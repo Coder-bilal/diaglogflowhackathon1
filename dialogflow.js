@@ -1,94 +1,67 @@
+const {
+    GoogleGenerativeAI,
+    HarmCategory,
+    HarmBlockThreshold,
+} = require("@google/generative-ai");
 require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const { WebhookClient } = require('dialogflow-fulfillment');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 
-// ────────────────────────────────────────────────
-// Environment variables check
-// ────────────────────────────────────────────────
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-    console.warn('Missing SUPABASE_URL or SUPABASE_KEY in .env - Database features will be disabled');
-}
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyC0El0Cxp-tAGj1Zx5rZAllypZr4Fzst78";
-if (!GEMINI_API_KEY) {
-    console.error('Missing GEMINI_API_KEY');
-    process.exit(1);
-}
+const MODEL_NAME = "gemini-flash-latest";
+const API_KEY = process.env.GEMINI_API_KEY;
 
 // ────────────────────────────────────────────────
-// Initialize clients
+// Database & Email Configuration
 // ────────────────────────────────────────────────
 const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_KEY)
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
     : null;
-
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const MODEL_NAME = 'gemini-1.5-flash-latest';   // ← updated to latest alias (stable)
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
     auth: {
-        user: "bilal317699@gmail.com",
-        pass: "khrc vion ltiv hdvi",   // ← App Password — never commit this!
+        user: process.env.GMAIL_USER || "bilal317699@gmail.com",
+        pass: process.env.GMAIL_PASS || "khrc vion ltiv hdvi",
     },
 });
 
 // ────────────────────────────────────────────────
-// Express setup
+// Gemini Configuration 
 // ────────────────────────────────────────────────
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cors());
-
-const PORT = process.env.PORT || 5000;
-
-// Simple status route
-app.get('/', (req, res) => {
-    res.send('Saylani Welfare Dialogflow webhook is running');
-});
-
-// Request logging middleware
-app.use((req, res, next) => {
-    console.log(`Path ${req.path} with Method ${req.method}`);
-    next();
-});
-
-// ────────────────────────────────────────────────
-// Gemini helper function
-// ────────────────────────────────────────────────
-async function getGeminiResponse(queryText) {
+async function runChat(queryText) {
     try {
+        const genAI = new GoogleGenerativeAI(API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+
         const generationConfig = {
-            temperature: 0.9,
+            temperature: 1,
+            topK: 0,
             topP: 0.95,
-            topK: 40,
-            maxOutputTokens: 250,
+            maxOutputTokens: 200,
         };
-        const chat = model.startChat({ generationConfig, history: [] });
+
+        const chat = model.startChat({
+            generationConfig,
+            history: [],
+        });
+
         const result = await chat.sendMessage(queryText);
-        const response = await result.response;
-        return response.text().trim() || "No response generated.";
-    } catch (err) {
-        console.error('Gemini error:', err);
-        return "Sorry, I'm having trouble processing that right now. Please try again.";
+        const response = result.response;
+        return response.text().trim();
+    } catch (error) {
+        console.error("Gemini Error:", error);
+        return "Sorry, I am having trouble connecting to the AI server. Please try again later.";
     }
 }
 
-// ────────────────────────────────────────────────
-// Email helper function
-// ────────────────────────────────────────────────
 async function sendEmailAsync(to, subject, text) {
     const message = {
-        from: '"Saylani Welfare Bot" <bilal317699@gmail.com>',
+        from: '"Digital Welfare Bot" <bilal317699@gmail.com>',
         to,
         subject,
         text,
@@ -104,17 +77,55 @@ async function sendEmailAsync(to, subject, text) {
 }
 
 // ────────────────────────────────────────────────
-// Main webhook endpoint
+// Express App Setup
 // ────────────────────────────────────────────────
-app.post('/dialogflow', async (req, res) => {
-    const agent = new WebhookClient({ request: req, response: res });
+const webApp = express();
+const PORT = process.env.PORT || 6000;
 
-    let sessionId = 'unknown';
-    if (req.body.session) {
-        const parts = req.body.session.split('/');
-        sessionId = parts[parts.length - 1] || 'unknown';
+webApp.use(express.urlencoded({
+    extended: true
+}));
+webApp.use(express.json());
+webApp.use(cors());
+
+webApp.use((req, res, next) => {
+    console.log(`Path ${req.path} with Method ${req.method}`);
+    next();
+});
+
+webApp.get('/', (req, res) => {
+    res.send("Digital Welfare Dialogflow webhook is running");
+});
+
+// ────────────────────────────────────────────────
+// Webhook Endpoint
+// ────────────────────────────────────────────────
+webApp.post('/dialogflow', async (req, res) => {
+
+    // Safe Session ID Parsing
+    const session = req.body.session || '';
+    const id = session.split('/').pop() || 'unknown';
+    console.log(`Session ID: ${id}`);
+
+    const agent = new WebhookClient({
+        request: req,
+        response: res
+    });
+
+    // ── Intent Functions ────────────────────────────
+
+    async function fallback() {
+        let action = req.body.queryResult.action;
+        let queryText = req.body.queryResult.queryText;
+
+        if (action === 'input.unknown') {
+            let result = await runChat(queryText);
+            agent.add(result);
+        } else {
+            let result = await runChat(queryText);
+            agent.add(result);
+        }
     }
-    console.log(`Webhook called — session: ${sessionId}`);
 
     // ── Welcome ─────────────────────────────────────
     function welcome(agent) {
@@ -136,19 +147,15 @@ app.post('/dialogflow', async (req, res) => {
     }
 
     // ── Donation Intent ─────────────────────────────
-    // ── Donation Intent (Clean version – no @sys.any assumption) ─────────────────────────────
-    // ── Donation Intent (Clean version – no @sys.any assumption) ─────────────────────────────
     async function donation(agent) {
         const params = agent.parameters || {};
         let query = agent.query || "";
 
-        // Extract parameters – custom entity + system entities
         let donationType = params.donation_type || "General";
         let amountRaw = params.amount || null;
         let phone = params.phone || "";
         let email = params.email || "";
 
-        // Fix: Extracts name correctly even if it's an object (sys.person)
         let name = "";
         let rawName = params.name;
         if (rawName) {
@@ -159,23 +166,18 @@ app.post('/dialogflow', async (req, res) => {
             }
         }
 
-        // Fix: If 'query' is just the email (due to slot filling), use a summary instead
         if (query.includes('@') && !query.includes(' ')) {
             query = `Donation Request (${donationType})`;
         }
 
-        // Clean donation type
         donationType = donationType.trim();
         if (!donationType || donationType.toLowerCase() === "donation" || donationType === "") {
             donationType = "General";
         }
 
-        // Amount ko display ke liye format karo (PKR add kar do)
         let amountDisplay = amountRaw ? `${amountRaw} PKR` : "Not specified";
-        let amountForDB = amountRaw ? String(amountRaw) : null;  // TEXT column ke liye string
+        let amountForDB = amountRaw ? String(amountRaw) : null;
 
-        // User ko dikhane wala message
-        // User ko dikhane wala message
         let message = `💚 **Thank You!**\n` +
             `We have noted your donation request. Your support means a lot!\n\n` +
             `📋 **Details:**\n` +
@@ -190,51 +192,32 @@ app.post('/dialogflow', async (req, res) => {
             `👉 [saylaniwelfare.com/donate](https://saylaniwelfare.com/donate)\n\n` +
             `Or call **111-729-526** for assistance.`;
 
-
-        // Background tasks: email + DB
         (async () => {
-            // Admin notification
             await sendEmailAsync(
                 "bilal317693@gmail.com",
                 "New Donation Interest",
-                `Type: ${donationType}\n` +
-                `Amount: ${amountDisplay}\n` +
-                `Name: ${name || '-'}\n` +
-                `Phone: ${phone || '-'}\n` +
-                `Email: ${email || '-'}\n` +
-                `Query: ${query}\n` +
-                `Session: ${sessionId}\n` +
-                `Time: ${new Date().toISOString()}`
+                `Type: ${donationType}\nAmount: ${amountDisplay}\nName: ${name || '-'}\nPhone: ${phone || '-'}\nEmail: ${email || '-'}\nQuery: ${query}\nSession: ${id}`
             );
 
-            // User thank-you (agar email diya ho)
             if (email && email.includes("@")) {
                 await sendEmailAsync(
                     email,
                     "Shukriya – Saylani Welfare",
-                    `Assalam-o-Alaikum ${name || "Dear Supporter"},\n\n` +
-                    `Aap ki donation interest note kar li gayi hai.\n` +
-                    `Type: ${donationType}\nAmount: ${amountDisplay}\n\n` +
-                    `Please donate via: https://saylaniwelfare.com/donate\n\n` +
-                    `JazakAllah – Saylani Team`
+                    `Assalam-o-Alaikum ${name || "Dear Supporter"},\n\nAap ki donation interest note kar li gayi hai.\nType: ${donationType}\nAmount: ${amountDisplay}\n\nPlease donate via: https://saylaniwelfare.com/donate\n\nJazakAllah – Saylani Team`
                 );
             }
 
-            // Supabase save
             if (supabase) {
-                const row = {
+                const { error } = await supabase.from('donations').insert([{
                     donation_type: donationType,
                     amount: amountForDB,
                     name: name || null,
                     phone: phone || null,
                     email: email || null,
                     query_text: query,
-                    session_id: sessionId
-                };
-
-                const { error } = await supabase.from('donations').insert([row]);
+                    session_id: id
+                }]);
                 if (error) console.error("DB insert error:", error);
-                else console.log("Donation saved");
             }
         })();
 
@@ -243,30 +226,22 @@ app.post('/dialogflow', async (req, res) => {
 
     // ── IT Registration Intent ──────────────────────
     async function itRegistration(agent) {
-        // Safer parameter extraction
         const params = agent.parameters || {};
-
-        // Debugging logs
-        console.log("IT Registration Params:", JSON.stringify(params, null, 2));
-
         let person = "Student";
         let rawPerson = params.person;
 
-        // Handle Array case (Dialogflow list parameters)
         if (Array.isArray(rawPerson)) {
             rawPerson = rawPerson.length > 0 ? rawPerson[0] : null;
         }
 
         if (rawPerson) {
             if (typeof rawPerson === 'object') {
-                // Try to find any string property that looks like a name
                 person = rawPerson.name || rawPerson['given-name'] || rawPerson.displayName || rawPerson.structValue?.fields?.name?.stringValue || "Student";
             } else {
                 person = String(rawPerson);
             }
         }
 
-        // Final fallback if person is somehow still an object/null
         if (typeof person !== 'string' || person === "[object Object]") {
             person = "Student";
         }
@@ -282,22 +257,15 @@ app.post('/dialogflow', async (req, res) => {
             `• Email: ${email || "—"} \n\n` +
             `JazakAllah for choosing Saylani Mass IT Training!`;
 
-        // Fire-and-forget: emails + db
         (async () => {
-            // Admin notification
             await sendEmailAsync(
                 "bilal317693@gmail.com",
                 "New Mass IT Registration",
-                `Name: ${person}\nCourse: ${course}\nPhone: ${phone}\nEmail: ${email}\nSession: ${sessionId}`
+                `Name: ${person}\nCourse: ${course}\nPhone: ${phone}\nEmail: ${email}\nSession: ${id}`
             );
 
-            // Confirmation to student (if email exists)
             if (email && email.includes("@")) {
-                await sendEmailAsync(
-                    email,
-                    "Saylani Mass IT - Registration Received",
-                    responseText
-                );
+                await sendEmailAsync(email, "Saylani Mass IT - Registration Received", responseText);
             }
 
             if (supabase) {
@@ -308,8 +276,6 @@ app.post('/dialogflow', async (req, res) => {
                         course: course,
                         email: email,
                         phone: phone,
-                        // session_id: sessionId, // Column missing in DB
-                        // created_at: new Date().toISOString()
                     }]);
                 if (error) console.error("Supabase IT insert error:", error);
             }
@@ -319,34 +285,27 @@ app.post('/dialogflow', async (req, res) => {
     }
 
     // ── Book Appointment ────────────────────────────
-    // ── Book Appointment ────────────────────────────
     async function bookAppointment(agent) {
         const params = agent.parameters || {};
         let userDate = params.date;
         let rawText = agent.query || '';
         let finalDate = "not specified";
-
-        // Extract basic contact info if available in parameters
         const email = params.email || "";
         const phone = params.phone || "";
 
         if (userDate) {
-            // sys.date usually gives ISO like "2026-02-15" or object
             if (typeof userDate === 'string') {
                 finalDate = userDate;
-            } else if (userDate.date) {   // sometimes it's {date: "2026-02-15"}
+            } else if (userDate.date) {
                 finalDate = userDate.date;
             }
         } else {
-            // Fallback: try to extract ourselves from raw text
             const lower = rawText.toLowerCase();
-
             if (lower.includes("tomorrow") || lower.includes("kal")) {
                 finalDate = "tomorrow";
             } else if (lower.includes("next monday") || lower.includes("agle monday")) {
                 finalDate = "next Monday";
             } else if (/\d{1,2}\s*(january|february|march|april|may|june|july|august|september|october|november|december)/i.test(lower)) {
-                // extract number + month with basic regex
                 const match = lower.match(/(\d{1,2})\s*(january|february|march|april|may|june|july|august|september|october|november|december)/i);
                 if (match) {
                     finalDate = `${match[1]} ${match[2]}`;
@@ -361,22 +320,15 @@ app.post('/dialogflow', async (req, res) => {
             `\nWe have noted your request. Please call 111-729-526 to confirm and book.\n` +
             `Or visit nearest Saylani center.`;
 
-        // Fire-and-forget: email + db
         (async () => {
-            // Admin notification
             await sendEmailAsync(
                 "bilal317693@gmail.com",
                 "New Appointment Request",
-                `Date: ${finalDate}\nEmail: ${email}\nPhone: ${phone}\nQuery: ${rawText}\nSession: ${sessionId}`
+                `Date: ${finalDate}\nEmail: ${email}\nPhone: ${phone}\nQuery: ${rawText}\nSession: ${id}`
             );
 
-            // User confirmation
             if (email && email.includes("@")) {
-                await sendEmailAsync(
-                    email,
-                    "Saylani Appointment Request",
-                    responseText
-                );
+                await sendEmailAsync(email, "Saylani Appointment Request", responseText);
             }
 
             if (supabase) {
@@ -395,31 +347,8 @@ app.post('/dialogflow', async (req, res) => {
         agent.add(responseText);
     }
 
-    // ── Fallback / Unknown ──────────────────────────
-    async function fallback(agent) {
-        const queryText = agent.query || req.body?.queryResult?.queryText || "";
-        console.log(`Fallback → ${queryText}`);
-
-        if (!queryText.trim()) {
-            agent.add("Sorry, I didn't catch that. Could you please say it again?");
-            return;
-        }
-
-        try {
-            const result = await Promise.race([
-                getGeminiResponse(queryText),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
-            ]);
-            agent.add(result);
-        } catch (err) {
-            console.error("Fallback error:", err);
-            agent.add("Sorry, that took longer than expected. " +
-                "Could you please rephrase your question?");
-        }
-    }
-
-    // ── Intent mapping ──────────────────────────────
-    const intentMap = new Map();
+    // ── Intent Mapping ──────────────────────────────
+    let intentMap = new Map();
     intentMap.set('Default Welcome Intent', welcome);
     intentMap.set('Default Fallback Intent', fallback);
     intentMap.set('RotiBank_Info', rotiBankInfo);
@@ -433,15 +362,11 @@ app.post('/dialogflow', async (req, res) => {
     } catch (err) {
         console.error("Webhook critical error:", err);
         if (!res.headersSent) {
-            agent.add("Something went wrong on our side. Please try again later.");
+            res.status(500).send("Internal Server Error");
         }
     }
 });
 
-// ────────────────────────────────────────────────
-// Start server
-// ────────────────────────────────────────────────
-app.listen(PORT, () => {
+webApp.listen(PORT, () => {
     console.log(`Server running on port ${PORT}   →   http://localhost:${PORT}/`);
-    console.log(`Webhook endpoint:                 /dialogflow`);
 });
